@@ -23,3 +23,9 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+
+# Build/Temp
+dist/
+build/
+LICENSE_TEXT
+.DS_Store

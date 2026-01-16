@@ -1,11 +1,15 @@
-# Antigravity Shit-Chat Mobile Monitor
+# Antigravity Phone Connect - Mobile Monitor
+
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 Need to go to the bathroom? But Opus 4.5 might be done with that big task soon? Want to eat lunch? But there's more tokens left before they reset right after lunch?
 
 <img width="1957" height="1060" alt="screenshot" src="https://github.com/user-attachments/assets/95318065-d943-43f1-b05c-26fd7c0733dd" />
 
+A real-time mobile interface for monitoring and interacting with Antigravity chat sessions.
 
-A real-time mobile interface for monitoring and interacting with Antigravity chat sessions. 
+---
+**Note:** This project is a refined fork/extension based on the original [Antigravity Shit-Chat](https://github.com/gherghett/Antigravity-Shit-Chat) by gherghett.
 
 ## How It Works
 
@@ -18,7 +22,7 @@ The server connects to Antigravity via Chrome DevTools Protocol (CDP) and period
 - Captures all CSS styles to preserve formatting
 - Captures the HTML of the chat interface
 - Buttons and everything that you wont be able to click
-- Polls every 3 seconds and only updates when content changes
+- Polls every 1 second and only updates when content changes
 
 ### 2. Injecting (Message Sending)
 Antigravity must be run in chrome with remote debugging enabled.
