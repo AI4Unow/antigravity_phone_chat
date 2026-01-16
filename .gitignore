@@ -27,5 +27,4 @@ Thumbs.db
 # Build/Temp
 dist/
 build/
-LICENSE_TEXT
 .DS_Store
