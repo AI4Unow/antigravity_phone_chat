@@ -35,9 +35,16 @@ else
     fi
 fi
 
+# 4. Check for SSL certificates
+PROTOCOL="http"
+if [ -f "certs/server.key" ] && [ -f "certs/server.cert" ]; then
+    PROTOCOL="https"
+    echo "[SSL] HTTPS enabled - secure connection available"
+fi
+
 echo ""
 echo "[READY] Server will be available at:"
-echo "      http://$MYIP:3000"
+echo "      $PROTOCOL://$MYIP:3000"
 echo ""
 
 # Platform-specific tips
@@ -45,6 +52,9 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     echo "[TIP] For Right-Click on macOS, see README.md for Automator Quick Action setup."
 else
     echo "[TIP] For Linux Right-Click (Nautilus), run: ./install_context_menu.sh"
+fi
+if [ "$PROTOCOL" == "http" ]; then
+    echo "[TIP] To enable HTTPS, run: node generate_ssl.js"
 fi
 echo ""
 
@@ -56,3 +66,4 @@ node server.js
 echo ""
 echo "[INFO] Server stopped."
 read -p "Press Enter to exit..."
+

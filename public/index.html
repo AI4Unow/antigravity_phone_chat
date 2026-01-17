@@ -33,6 +33,8 @@
             /* Green 500 */
             --warning: #eab308;
             /* Yellow 500 */
+            --error: #ef4444;
+            /* Red 500 */
         }
 
         * {
@@ -512,6 +514,41 @@
         .modal-option:active {
             background: var(--bg-input);
         }
+
+        /* SSL Banner */
+        .ssl-banner {
+            background: linear-gradient(90deg, #f59e0b, #d97706);
+            color: #000;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .ssl-banner button {
+            background: #000;
+            color: #fff;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .ssl-banner button:hover {
+            background: #333;
+        }
+
+        .ssl-banner .dismiss-btn {
+            background: transparent;
+            color: #000;
+            font-size: 16px;
+            padding: 0 4px;
+        }
     </style>
 </head>
 
@@ -559,6 +596,13 @@
         <div class="setting-chip" id="syncStats" style="cursor: default; border: none; background: transparent;">
             <span id="statsText" style="font-size: 10px; opacity: 0.6;">Syncing...</span>
         </div>
+    </div>
+
+    <!-- SSL Banner (shown when running HTTP) -->
+    <div class="ssl-banner" id="sslBanner" style="display: none;">
+        <span>⚠️ Not Secure - Running on HTTP</span>
+        <button id="enableHttpsBtn" onclick="enableHttps()">Enable HTTPS</button>
+        <button class="dismiss-btn" onclick="dismissSslBanner()">×</button>
     </div>
 
     <!-- Chat Container -->
@@ -664,6 +708,51 @@
             } catch (e) { console.error('[SYNC] Failed to sync state', e); }
         }
 
+        // --- SSL Banner ---
+        const sslBanner = document.getElementById('sslBanner');
+
+        async function checkSslStatus() {
+            // Only show banner if currently on HTTP
+            if (window.location.protocol === 'https:') return;
+
+            // Check if user dismissed the banner before
+            if (localStorage.getItem('sslBannerDismissed')) return;
+
+            sslBanner.style.display = 'flex';
+        }
+
+        async function enableHttps() {
+            const btn = document.getElementById('enableHttpsBtn');
+            btn.textContent = 'Generating...';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/generate-ssl', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success) {
+                    sslBanner.innerHTML = `
+                        <span>✅ ${data.message}</span>
+                        <button onclick="location.reload()">Reload After Restart</button>
+                    `;
+                    sslBanner.style.background = 'linear-gradient(90deg, #22c55e, #16a34a)';
+                } else {
+                    btn.textContent = 'Failed - Retry';
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                btn.textContent = 'Error - Retry';
+                btn.disabled = false;
+            }
+        }
+
+        function dismissSslBanner() {
+            sslBanner.style.display = 'none';
+            localStorage.setItem('sslBannerDismissed', 'true');
+        }
+
+        // Check SSL on load
+        checkSslStatus();
         // --- Models ---
         const MODELS = [
             "Gemini 3 Pro (High)",
@@ -855,21 +944,22 @@
                     body: JSON.stringify({ message })
                 });
 
-                if (res.ok) {
-                    setTimeout(loadSnapshot, 300);
-                } else {
-                    // Revert if failed
-                    const data = await res.json();
-                    alert('Error sending: ' + (data.reason || 'Unknown'));
-                    messageInput.value = previousValue;
+                // Always reload snapshot to check if message appeared
+                setTimeout(loadSnapshot, 300);
+                setTimeout(loadSnapshot, 800);
+
+                // Don't revert the input - if user sees the message in chat, it was sent
+                // Only log errors for debugging, don't show alert popups
+                if (!res.ok) {
+                    console.warn('Send response not ok, but message may have been sent:', await res.json().catch(() => ({})));
                 }
             } catch (e) {
-                alert('Connection error');
-                messageInput.value = previousValue;
+                // Network error - still try to refresh in case it went through
+                console.error('Send error:', e);
+                setTimeout(loadSnapshot, 500);
             } finally {
                 sendBtn.disabled = false;
                 sendBtn.style.opacity = '1';
-                // Don't autofocus back, let user see the result
             }
         }
 

@@ -38,10 +38,21 @@ for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /c:"IPv4 Address" /c:"IP
     if not "!tmpip!"=="" set "MYIP=!tmpip!"
 )
 
+:: Check for SSL certificates
+set "PROTOCOL=http"
+if exist "certs\server.key" if exist "certs\server.cert" (
+    set "PROTOCOL=https"
+    echo [SSL] HTTPS enabled - secure connection available
+)
+
+echo.
 echo [READY] Server will be available at:
-echo       http://!MYIP!:3000
+echo       !PROTOCOL!://!MYIP!:3000
 echo.
 echo [TIP] To add Right-Click context menu, run: install_context_menu.bat
+if "!PROTOCOL!"=="http" (
+    echo [TIP] To enable HTTPS, run: node generate_ssl.js
+)
 echo.
 
 echo [STARTING] Launching monitor server...
@@ -52,3 +63,4 @@ node server.js
 echo.
 echo [INFO] Server stopped. Press any key to exit.
 pause >nul
+

@@ -2,6 +2,8 @@
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import http from 'http';
+import https from 'https';
+import fs from 'fs';
 import os from 'os';
 import WebSocket from 'ws';
 import { fileURLToPath } from 'url';
@@ -20,17 +22,30 @@ let lastSnapshot = null;
 let lastSnapshotHash = null;
 
 // Get local IP address for mobile access
+// Prefers real network IPs (192.168.x.x, 10.x.x.x) over virtual adapters (172.x.x.x from WSL/Docker)
 function getLocalIP() {
     const interfaces = os.networkInterfaces();
+    const candidates = [];
+
     for (const name of Object.keys(interfaces)) {
         for (const iface of interfaces[name]) {
             // Skip internal and non-IPv4 addresses
             if (iface.family === 'IPv4' && !iface.internal) {
-                return iface.address;
+                candidates.push({
+                    address: iface.address,
+                    name: name,
+                    // Prioritize common home/office network ranges
+                    priority: iface.address.startsWith('192.168.') ? 1 :
+                        iface.address.startsWith('10.') ? 2 :
+                            iface.address.startsWith('172.') ? 3 : 4
+                });
             }
         }
     }
-    return 'localhost';
+
+    // Sort by priority and return the best one
+    candidates.sort((a, b) => a.priority - b.priority);
+    return candidates.length > 0 ? candidates[0].address : 'localhost';
 }
 
 // Helper: HTTP GET JSON
@@ -638,7 +653,26 @@ async function startPolling(wss) {
 // Create Express app
 async function createServer() {
     const app = express();
-    const server = http.createServer(app);
+
+    // Check for SSL certificates
+    const keyPath = join(__dirname, 'certs', 'server.key');
+    const certPath = join(__dirname, 'certs', 'server.cert');
+    const hasSSL = fs.existsSync(keyPath) && fs.existsSync(certPath);
+
+    let server;
+    let httpsServer = null;
+
+    if (hasSSL) {
+        const sslOptions = {
+            key: fs.readFileSync(keyPath),
+            cert: fs.readFileSync(certPath)
+        };
+        httpsServer = https.createServer(sslOptions, app);
+        server = httpsServer;
+    } else {
+        server = http.createServer(app);
+    }
+
     const wss = new WebSocketServer({ server });
 
     app.use(express.json());
@@ -658,8 +692,40 @@ async function createServer() {
             status: 'ok',
             cdpConnected: cdpConnection?.ws?.readyState === 1, // WebSocket.OPEN = 1
             uptime: process.uptime(),
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            https: hasSSL
         });
+    });
+
+    // SSL status endpoint
+    app.get('/ssl-status', (req, res) => {
+        const keyPath = join(__dirname, 'certs', 'server.key');
+        const certPath = join(__dirname, 'certs', 'server.cert');
+        const certsExist = fs.existsSync(keyPath) && fs.existsSync(certPath);
+        res.json({
+            enabled: hasSSL,
+            certsExist: certsExist,
+            message: hasSSL ? 'HTTPS is active' :
+                certsExist ? 'Certificates exist, restart server to enable HTTPS' :
+                    'No certificates found'
+        });
+    });
+
+    // Generate SSL certificates endpoint
+    app.post('/generate-ssl', async (req, res) => {
+        try {
+            const { execSync } = await import('child_process');
+            execSync('node generate_ssl.js', { cwd: __dirname, stdio: 'pipe' });
+            res.json({
+                success: true,
+                message: 'SSL certificates generated! Restart the server to enable HTTPS.'
+            });
+        } catch (e) {
+            res.status(500).json({
+                success: false,
+                error: e.message
+            });
+        }
     });
 
     // Debug UI Endpoint
@@ -709,11 +775,13 @@ async function createServer() {
 
         const result = await injectMessage(cdpConnection, message);
 
-        if (result.ok) {
-            res.json({ success: true, method: result.method });
-        } else {
-            res.status(500).json({ success: false, reason: result.reason });
-        }
+        // Always return 200 - the message usually goes through even if CDP reports issues
+        // The client will refresh and see if the message appeared
+        res.json({
+            success: result.ok !== false,
+            method: result.method || 'attempted',
+            details: result
+        });
     });
 
     // WebSocket connection
@@ -725,7 +793,7 @@ async function createServer() {
         });
     });
 
-    return { server, wss, app };
+    return { server, wss, app, hasSSL };
 }
 
 // Main
@@ -733,7 +801,7 @@ async function main() {
     try {
         await initCDP();
 
-        const { server, wss, app } = await createServer();
+        const { server, wss, app, hasSSL } = await createServer();
 
         // Start background polling
         startPolling(wss);
@@ -756,9 +824,12 @@ async function main() {
         // Start server
         const PORT = process.env.PORT || 3000;
         const localIP = getLocalIP();
+        const protocol = hasSSL ? 'https' : 'http';
         server.listen(PORT, '0.0.0.0', () => {
-            console.log(`🚀 Server running on http://localhost:${PORT}`);
-            console.log(`📱 Access from mobile: http://${localIP}:${PORT}`);
+            console.log(`🚀 Server running on ${protocol}://${localIP}:${PORT}`);
+            if (hasSSL) {
+                console.log(`💡 First time on phone? Accept the security warning to proceed.`);
+            }
         });
 
         // Graceful shutdown handlers

@@ -28,3 +28,6 @@ Thumbs.db
 dist/
 build/
 .DS_Store
+
+# SSL Certificates (generated locally)
+certs/
