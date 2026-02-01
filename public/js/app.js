@@ -18,6 +18,8 @@ const modalList = document.getElementById('modalList');
 const modalTitle = document.getElementById('modalTitle');
 const modeText = document.getElementById('modeText');
 const modelText = document.getElementById('modelText');
+const historyLayer = document.getElementById('historyLayer');
+const historyList = document.getElementById('historyList');
 
 // --- State ---
 let autoRefreshEnabled = true;
@@ -750,84 +752,27 @@ newChatBtn.addEventListener('click', startNewChat);
 
 // --- Chat History Logic ---
 async function showChatHistory() {
-    historyBtn.style.opacity = '0.5';
+    const historyLayer = document.getElementById('historyLayer');
+    const historyList = document.getElementById('historyList');
 
-    try {
-        const res = await fetchWithAuth('/chat-history');
-        const data = await res.json();
-
-        modalTitle.textContent = 'Past Conversations';
-        modalList.innerHTML = '';
-
-        if (data.chats && data.chats.length > 0) {
-            // Add "New Chat" option at the top
-            const newChatDiv = document.createElement('div');
-            newChatDiv.className = 'history-item';
-            newChatDiv.innerHTML = `
-                <div class="history-item-icon" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">
-                    <svg viewBox="0 0 24 24" style="stroke: white;">
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                </div>
-                <div class="history-item-text">
-                    <div class="history-item-title" style="color: var(--accent);">Start New Conversation</div>
-                </div>
-            `;
-            newChatDiv.onclick = () => {
-                closeModal();
-                startNewChat();
-            };
-            modalList.appendChild(newChatDiv);
-
-            // Add chat history items
-            data.chats.forEach(chat => {
-                const div = document.createElement('div');
-                div.className = 'history-item';
-                div.innerHTML = `
-                    <div class="history-item-icon">
-                        <svg viewBox="0 0 24 24">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                        </svg>
-                    </div>
-                    <div class="history-item-text">
-                        <div class="history-item-title">${escapeHtml(chat.title)}</div>
-                    </div>
-                `;
-                div.onclick = async () => {
-                    closeModal();
-                    await selectChat(chat.title);
-                };
-                modalList.appendChild(div);
-            });
-        } else {
-            modalList.innerHTML = `
-                <div class="history-empty">
-                    <p>No past conversations found.</p>
-                    <button class="empty-state-btn" onclick="closeModal(); startNewChat();">
-                        Start New Conversation
-                    </button>
-                </div>
-            `;
-        }
-
-        // Add cancel button
-        const cancelDiv = document.createElement('div');
-        cancelDiv.style.cssText = 'margin-top:20px; text-align:center;';
-        cancelDiv.innerHTML = `
-            <button onclick="closeModal()" 
-                style="background:transparent; border:none; color:var(--text-muted); padding:10px;">
-                Cancel
-            </button>
-        `;
-        modalList.appendChild(cancelDiv);
-
-        modalOverlay.classList.add('show');
-    } catch (e) {
-        console.error('Failed to load chat history:', e);
-    }
-
+    // Temporary: Feature is in development
+    historyList.innerHTML = `
+        <div style="padding: 40px 20px; text-align: center; color: white;">
+            <div style="font-size: 24px; margin-bottom: 10px;">🚧</div>
+            <div style="font-weight: 500; margin-bottom: 5px;">History In Development</div>
+            <div style="font-size: 13px; opacity: 0.7;">We are working on improving the history sync. Check back soon!</div>
+            <br>
+            <div class="history-item new-chat-item" onclick="hideChatHistory(); startNewChat();" style="justify-content: center; background: var(--accent); color: white; border:none;">
+                Start New Conversation
+            </div>
+        </div>
+    `;
+    historyLayer.classList.add('show');
     setTimeout(() => historyBtn.style.opacity = '1', 300);
+}
+
+function hideChatHistory() {
+    historyLayer.classList.remove('show');
 }
 
 historyBtn.addEventListener('click', showChatHistory);
@@ -873,7 +818,7 @@ async function checkChatStatus() {
 // --- Empty State (No Chat Open) ---
 function showEmptyState() {
     chatContent.innerHTML = `
-        <div class="empty-state">
+                < div class="empty-state" >
             <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                 <line x1="9" y1="10" x2="15" y2="10"></line>
@@ -883,8 +828,8 @@ function showEmptyState() {
             <button class="empty-state-btn" onclick="startNewChat()">
                 Start New Conversation
             </button>
-        </div>
-    `;
+        </div >
+                `;
 }
 
 // --- Utility: Escape HTML ---

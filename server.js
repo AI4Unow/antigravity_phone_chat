@@ -634,17 +634,25 @@ async function setModel(cdp, modelName) {
             // 4. Select specific model inside the dialog
             // Search deep for the specific text
             const allDialogEls = Array.from(visibleDialog.querySelectorAll('*'));
+            const validEls = allDialogEls.filter(el => el.children.length === 0 && el.textContent.trim().length > 0);
             
-            // Try exact match first
-            let target = allDialogEls.find(el => 
-                el.children.length === 0 && el.textContent.trim() === '${modelName}'
-            );
+            // A. Exact Match (Best)
+            let target = validEls.find(el => el.textContent.trim() === '${modelName}');
             
-            // Try partial/inclusive match
+            // B. Page contains Model (e.g. Page: "Gemini 3 Pro v1.5", Model: "Gemini 3 Pro")
             if (!target) {
-                 target = allDialogEls.find(el => 
-                    el.children.length === 0 && el.textContent.includes('${modelName}')
-                );
+                 target = validEls.find(el => el.textContent.includes('${modelName}'));
+            }
+
+            // C. Model contains Page (e.g. Page: "Gemini 3 Pro", Model: "Gemini 3 Pro (High)")
+            // We must find the LONGEST match to avoid matching "Gemini" when "Gemini 3" exists.
+            if (!target) {
+                const candidates = validEls.filter(el => '${modelName}'.includes(el.textContent.trim()));
+                if (candidates.length > 0) {
+                    // Sort by length descending
+                    candidates.sort((a, b) => b.textContent.trim().length - a.textContent.trim().length);
+                    target = candidates[0];
+                }
             }
 
             if (target) {
@@ -744,8 +752,9 @@ async function getChatHistory(cdp) {
     const EXP = `(async () => {
         try {
             const chats = [];
+            const seenTitles = new Set();
 
-             // Priority 1: Look for tooltip ID pattern (history/past/recent)
+            // Priority 1: Look for tooltip ID pattern (history/past/recent)
             let historyBtn = document.querySelector('[data-tooltip-id*="history"], [data-tooltip-id*="past"], [data-tooltip-id*="recent"], [data-tooltip-id*="conversation-history"]');
             
             // Priority 2: Look for button ADJACENT to the new chat button
@@ -761,9 +770,9 @@ async function getChatHistory(cdp) {
             }
 
             // Fallback: Use previous heuristics (icon/aria-label)
-             if (!historyBtn) {
-                 const allButtons = Array.from(document.querySelectorAll('button, [role="button"], a[data-tooltip-id]'));
-                 for (const btn of allButtons) {
+            if (!historyBtn) {
+                const allButtons = Array.from(document.querySelectorAll('button, [role="button"], a[data-tooltip-id]'));
+                for (const btn of allButtons) {
                     if (btn.offsetParent === null) continue;
                     const hasHistoryIcon = btn.querySelector('svg.lucide-clock') ||
                                            btn.querySelector('svg.lucide-history') ||
@@ -777,70 +786,134 @@ async function getChatHistory(cdp) {
                 }
             }
             
-            if (historyBtn) {
-                historyBtn.click();
-                await new Promise(r => setTimeout(r, 600));
-                
-                const panels = Array.from(document.querySelectorAll(
-                    '[role="dialog"], [role="menu"], [class*="sidebar"], [class*="panel"], ' +
-                    '[class*="drawer"], [class*="popover"], [class*="dropdown"], [class*="history"]'
-                ));
-                
-                for (const panel of panels) {
-                    if (!panel.offsetParent) continue;
-                    
-                    const items = Array.from(panel.querySelectorAll('div, li, a, button, span'));
-                    const seenTitles = new Set();
-                    
-                    for (const item of items) {
-                        const text = item.innerText?.trim();
-                        if (!text || text.length < 3 || text.length > 200) continue;
-                        if (item.children.length > 3) continue;
+            if (!historyBtn) {
+                return { error: 'History button not found', chats: [] };
+            }
 
-                        const lowerText = text.toLowerCase();
-                        if (lowerText === 'history' || lowerText === 'threads' ||
-                            lowerText === 'recent' || lowerText === 'new chat' || 
-                            lowerText.includes('setting') || lowerText === 'close' || 
-                            lowerText === 'cancel' || lowerText === 'search') continue;
-                        
-                        const style = window.getComputedStyle(item);
-                        const isClickable = style.cursor === 'pointer' || 
-                                           item.tagName === 'BUTTON' || 
-                                           item.tagName === 'A' ||
-                                           item.closest('[role="button"]');
-                        if (!isClickable) continue;
-                        
-                        const title = text.split('\\n')[0].trim();
-                        if (title && !seenTitles.has(title) && title.length > 2) {
-                            seenTitles.add(title);
-                            chats.push({
-                                title: title,
-                                index: chats.length
-                            });
-                            
-                            if (chats.length >= 20) break;
-                        }
-                    }
-                    
-                    if (chats.length > 0) break;
-                }
+            // Click and Wait
+            historyBtn.click();
+            await new Promise(r => setTimeout(r, 2000));
+            
+            // Find the side panel
+            let panel = null;
+            let inputsFoundDebug = [];
+            
+            // Strategy 1: The search input has specific placeholder
+            let searchInput = null;
+            const inputs = Array.from(document.querySelectorAll('input'));
+            searchInput = inputs.find(i => {
+                const ph = (i.placeholder || '').toLowerCase();
+                return ph.includes('select') || ph.includes('conversation');
+            });
+            
+            // Strategy 2: Look for any text input that looks like a search bar (based on user snippet classes)
+            if (!searchInput) {
+                const allInputs = Array.from(document.querySelectorAll('input[type="text"]'));
+                inputsFoundDebug = allInputs.map(i => 'ph:' + i.placeholder + ', cls:' + i.className);
                 
-                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-                
-                return { 
-                    success: true, 
-                    chats: chats, 
-                    historyBtnFound: true,
-                    method: 'found_history_btn'
-                };
+                searchInput = allInputs.find(i => 
+                    i.offsetParent !== null && 
+                    (i.className.includes('w-full') || i.classList.contains('w-full'))
+                );
             }
             
-            return { success: false, error: 'History button not found', chats: [] };
+            // Strategy 3: Find known text in the panel (Anchor Text Strategy)
+            let anchorElement = null;
+            if (!searchInput) {
+                 const allSpans = Array.from(document.querySelectorAll('span, div, p'));
+                 anchorElement = allSpans.find(s => {
+                     const t = (s.innerText || '').trim();
+                     return t === 'Current' || t === 'Refining Chat History Scraper'; // specific known title
+                 });
+            }
+
+            const startElement = searchInput || anchorElement;
+
+            if (startElement) {
+                // Walk up to find the panel container
+                let container = startElement;
+                for (let i = 0; i < 15; i++) { 
+                    if (!container.parentElement) break;
+                    container = container.parentElement;
+                    const rect = container.getBoundingClientRect();
+                    
+                    // Panel should have good dimensions
+                    // Relaxed constraints for mobile
+                    if (rect.width > 50 && rect.height > 100) {
+                        panel = container;
+                        
+                        // If it looks like a modal/popover (fixed or absolute pos), that's definitely it
+                        const style = window.getComputedStyle(container);
+                        if (style.position === 'fixed' || style.position === 'absolute' || style.zIndex > 10) {
+                            break;
+                        }
+                    }
+                }
+                }
+                // Fallback if loop finishes without specific break
+                if (!panel && startElement) {
+                     // Just go up 4 levels
+                     let p = startElement;
+                     for(let k=0; k<4; k++) { if(p.parentElement) p = p.parentElement; }
+                     panel = p;
+                }
+            }
+            
+            const debugInfo = { 
+                panelFound: !!panel, 
+                panelWidth: panel?.offsetWidth || 0,
+                inputFound: !!searchInput,
+                anchorFound: !!anchorElement,
+                inputsDebug: inputsFoundDebug.slice(0, 5)
+            };
+            
+            if (panel) {
+                // Chat titles are in <span> elements
+                const spans = Array.from(panel.querySelectorAll('span'));
+                
+                // Section headers to skip
+                const SKIP_EXACT = new Set([
+                    'current', 'other conversations', 'now'
+                ]);
+                
+                for (const span of spans) {
+                    const text = span.textContent?.trim() || '';
+                    const lower = text.toLowerCase();
+                    
+                    // Skip empty or too short
+                    if (text.length < 3) continue;
+                    
+                    // Skip section headers
+                    if (SKIP_EXACT.has(lower)) continue;
+                    if (lower.startsWith('recent in ')) continue;
+                    if (lower.startsWith('show ') && lower.includes('more')) continue;
+                    
+                    // Skip timestamps
+                    if (lower.endsWith(' ago') || /^\\d+\\s*(sec|min|hr|day|wk|mo|yr)/i.test(lower)) continue;
+                    
+                    // Skip very long text (containers)
+                    if (text.length > 100) continue;
+                    
+                    // Skip duplicates
+                    if (seenTitles.has(text)) continue;
+                    
+                    seenTitles.add(text);
+                    chats.push({ title: text, date: 'Recent' });
+                    
+                    if (chats.length >= 50) break;
+                }
+            }
+            
+            // Cleanup: Close the panel
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+            return { success: true, chats: chats, debug: debugInfo };
         } catch(e) {
             return { error: e.toString(), chats: [] };
         }
     })()`;
 
+    let lastError = null;
     for (const ctx of cdp.contexts) {
         try {
             const res = await cdp.call("Runtime.evaluate", {
@@ -850,16 +923,23 @@ async function getChatHistory(cdp) {
                 contextId: ctx.id
             });
             if (res.result?.value) return res.result.value;
-        } catch (e) { }
+            // If result.value is null/undefined but no error thrown, check exceptionDetails
+            if (res.exceptionDetails) {
+                lastError = res.exceptionDetails.exception?.description || res.exceptionDetails.text;
+            }
+        } catch (e) {
+            lastError = e.message;
+        }
     }
-    return { error: 'Context failed', chats: [] };
+    return { error: 'Context failed: ' + (lastError || 'No contexts available'), chats: [] };
 }
+
 async function selectChat(cdp, chatTitle) {
     const safeChatTitle = JSON.stringify(chatTitle);
 
     const EXP = `(async () => {
     try {
-        const targetTitle = ${ safeChatTitle };
+        const targetTitle = ${safeChatTitle};
 
         // First, we need to open the history panel
         // Find the history button at the top (next to + button)
@@ -1108,11 +1188,11 @@ function isLocalRequest(req) {
 async function initCDP() {
     console.log('🔍 Discovering Antigravity CDP endpoint...');
     const cdpInfo = await discoverCDP();
-    console.log(`✅ Found Antigravity on port ${ cdpInfo.port } `);
+    console.log(`✅ Found Antigravity on port ${cdpInfo.port} `);
 
     console.log('🔌 Connecting to CDP...');
     cdpConnection = await connectCDP(cdpInfo.url);
-    console.log(`✅ Connected! Found ${ cdpConnection.contexts.length } execution contexts\n`);
+    console.log(`✅ Connected! Found ${cdpConnection.contexts.length} execution contexts\n`);
 }
 
 // Background polling
@@ -1164,14 +1244,14 @@ async function startPolling(wss) {
                         }
                     });
 
-                    console.log(`📸 Snapshot updated(hash: ${ hash })`);
+                    console.log(`📸 Snapshot updated(hash: ${hash})`);
                 }
             } else {
                 // Snapshot is null or has error
                 const now = Date.now();
                 if (!lastErrorLog || now - lastErrorLog > 10000) {
                     const errorMsg = snapshot?.error || 'No valid snapshot captured (check contexts)';
-                    console.warn(`⚠️  Snapshot capture issue: ${ errorMsg } `);
+                    console.warn(`⚠️  Snapshot capture issue: ${errorMsg} `);
                     if (errorMsg === 'cascade not found') {
                         console.log('   (Tip: Ensure an active chat is open in Antigravity)');
                     }
@@ -1533,7 +1613,7 @@ async function createServer() {
                         contextResults.push({
                             contextId: ctx.id,
                             frameId: ctx.frameId,
-                            error: `Script Exception: ${ result.exceptionDetails.text } ${ result.exceptionDetails.exception?.description || '' } `
+                            error: `Script Exception: ${result.exceptionDetails.text} ${result.exceptionDetails.exception?.description || ''} `
                         });
                     } else {
                         contextResults.push({
@@ -1594,59 +1674,59 @@ async function createServer() {
         for (const port of PORTS) {
             try {
                 const list = await getJson(`http://127.0.0.1:${port}/json/list`);
-results[port] = list;
+                results[port] = list;
             } catch (e) {
-    results[port] = e.message;
-}
-        }
-res.json(results);
-    });
-
-// WebSocket connection with Auth check
-wss.on('connection', (ws, req) => {
-    // Parse cookies from headers
-    const rawCookies = req.headers.cookie || '';
-    const parsedCookies = {};
-    rawCookies.split(';').forEach(c => {
-        const [k, v] = c.trim().split('=');
-        if (k && v) {
-            try {
-                parsedCookies[k] = decodeURIComponent(v);
-            } catch (e) {
-                parsedCookies[k] = v;
+                results[port] = e.message;
             }
         }
+        res.json(results);
     });
 
-    // Verify signed cookie manually
-    const signedToken = parsedCookies[AUTH_COOKIE_NAME];
-    let isAuthenticated = false;
+    // WebSocket connection with Auth check
+    wss.on('connection', (ws, req) => {
+        // Parse cookies from headers
+        const rawCookies = req.headers.cookie || '';
+        const parsedCookies = {};
+        rawCookies.split(';').forEach(c => {
+            const [k, v] = c.trim().split('=');
+            if (k && v) {
+                try {
+                    parsedCookies[k] = decodeURIComponent(v);
+                } catch (e) {
+                    parsedCookies[k] = v;
+                }
+            }
+        });
 
-    // Exempt local Wi-Fi devices from authentication
-    if (isLocalRequest(req)) {
-        isAuthenticated = true;
-    } else if (signedToken) {
-        const token = cookieParser.signedCookie(signedToken, 'antigravity_secret_key_1337');
-        if (token === AUTH_TOKEN) {
+        // Verify signed cookie manually
+        const signedToken = parsedCookies[AUTH_COOKIE_NAME];
+        let isAuthenticated = false;
+
+        // Exempt local Wi-Fi devices from authentication
+        if (isLocalRequest(req)) {
             isAuthenticated = true;
+        } else if (signedToken) {
+            const token = cookieParser.signedCookie(signedToken, 'antigravity_secret_key_1337');
+            if (token === AUTH_TOKEN) {
+                isAuthenticated = true;
+            }
         }
-    }
 
-    if (!isAuthenticated) {
-        console.log('🚫 Unauthorized WebSocket connection attempt');
-        ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
-        setTimeout(() => ws.close(), 100);
-        return;
-    }
+        if (!isAuthenticated) {
+            console.log('🚫 Unauthorized WebSocket connection attempt');
+            ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
+            setTimeout(() => ws.close(), 100);
+            return;
+        }
 
-    console.log('📱 Client connected (Authenticated)');
+        console.log('📱 Client connected (Authenticated)');
 
-    ws.on('close', () => {
-        console.log('📱 Client disconnected');
+        ws.on('close', () => {
+            console.log('📱 Client disconnected');
+        });
     });
-});
 
-return { server, wss, app, hasSSL };
+    return { server, wss, app, hasSSL };
 }
 
 // Main
