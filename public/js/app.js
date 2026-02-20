@@ -238,17 +238,34 @@ async function loadSnapshot() {
             '    width: 100% !important;\n' +
             '}\n' +
             '\n' +
-            '#conversation *, #chat *, #cascade * {\n' +
+            '/* Fix stacking BUT preserve absolute/fixed positioning for dropdowns */\n' +
+            '#conversation > div, #chat > div, #cascade > div {\n' +
             '    position: static !important;\n' +
+            '}\n' +
+            '/* Preserve absolute positioning needed for dropdowns, tooltips, popups */\n' +
+            '[style*="position: absolute"], [style*="position: fixed"],\n' +
+            '[data-headlessui-state], [id*="headlessui"] {\n' +
+            '    position: absolute !important;\n' +
             '}\n' +
             '\n' +
             '#conversation p, #chat p, #cascade p, #conversation h1, #chat h1, #cascade h1, #conversation h2, #chat h2, #cascade h2, #conversation h3, #chat h3, #cascade h3, #conversation h4, #chat h4, #cascade h4, #conversation h5, #chat h5, #cascade h5, #conversation span, #chat span, #cascade span, #conversation div, #chat div, #cascade div, #conversation li, #chat li, #cascade li {\n' +
             '    color: inherit !important;\n' +
             '}\n' +
             '\n' +
+            '/* Force black inline text to white */\n' +
+            '[style*="color: rgb(0, 0, 0)"], [style*="color: black"],\n' +
+            '[style*="color:#000"], [style*="color: #000"] {\n' +
+            '    color: #e2e8f0 !important;\n' +
+            '}\n' +
+            '\n' +
             '#conversation a, #chat a, #cascade a {\n' +
             '    color: #60a5fa !important;\n' +
             '    text-decoration: underline;\n' +
+            '}\n' +
+            '\n' +
+            '/* Hide broken local file icons (served from /c:/Users/... paths) */\n' +
+            'img[src^="/c:"], img[src^="/C:"], img[src*="AppData"] {\n' +
+            '    display: none !important;\n' +
             '}\n' +
             '\n' +
             '/* Fix Inline Code - Ultra-compact */\n' +
@@ -315,7 +332,7 @@ async function loadSnapshot() {
             '    position: absolute !important;\n' +
             '    top: 2px !important;\n' +
             '    right: 2px !important;\n' +
-            '    background: rgba(30, 41, 59, 0.5) !important; /* Transparent bg */\n' +
+            '    background: rgba(30, 41, 59, 0.5) !important;\n' +
             '    color: #94a3b8 !important;\n' +
             '    border: none !important;\n' +
             '    width: 24px !important; \n' +
@@ -369,9 +386,9 @@ async function loadSnapshot() {
             '    width: 0 !important;\n' +
             '}\n' +
             '                \n' +
-            '[style*=\"background-color: rgb(255, 255, 255)\"],\n' +
-            '[style*=\"background-color: white\"],\n' +
-            '[style*=\"background: white\"] {\n' +
+            '[style*="background-color: rgb(255, 255, 255)"],\n' +
+            '[style*="background-color: white"],\n' +
+            '[style*="background: white"] {\n' +
             '    background-color: transparent !important;\n' +
             '}';
         styleTag.textContent = darkModeOverrides;

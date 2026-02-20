@@ -1192,16 +1192,31 @@ async function getAppState(cdp) {
         }
 
         // 2. Get Model
-        // Strategy: Look for button containing a known model keyword
+        // Strategy: Look for leaf text nodes containing a known model keyword
         const KNOWN_MODELS = ["Gemini", "Claude", "GPT"];
-        const textNodes = allEls.filter(el => el.children.length === 0 && el.innerText);
-        const modelEl = textNodes.find(el => {
-            const txt = el.innerText;
-            // Avoids "Select Model" placeholder if possible, but usually a model is selected
-            return KNOWN_MODELS.some(k => txt.includes(k)) &&
-                // Check if it's near a chevron (likely values in the header)
-                el.closest('button')?.querySelector('svg.lucide-chevron-up');
+        const textNodes2 = allEls.filter(el => el.children.length === 0 && el.innerText);
+        
+        // First try: find inside a clickable parent (button, cursor:pointer)
+        let modelEl = textNodes2.find(el => {
+            const txt = el.innerText.trim();
+            if (!KNOWN_MODELS.some(k => txt.includes(k))) return false;
+            // Must be in a clickable context (header/toolbar, not chat content)
+            let parent = el;
+            for (let i = 0; i < 8; i++) {
+                if (!parent) break;
+                if (parent.tagName === 'BUTTON' || window.getComputedStyle(parent).cursor === 'pointer') return true;
+                parent = parent.parentElement;
+            }
+            return false;
         });
+        
+        // Fallback: any leaf node with a known model name
+        if (!modelEl) {
+            modelEl = textNodes2.find(el => {
+                const txt = el.innerText.trim();
+                return KNOWN_MODELS.some(k => txt.includes(k)) && txt.length < 60;
+            });
+        }
 
         if (modelEl) {
             state.model = modelEl.innerText.trim();
