@@ -5,22 +5,19 @@ import random
 import string
 import os
 import socket
-import argparse
-import logging
 
 # -----------------------------------------------------------------------------
 # Dependency Management
 # -----------------------------------------------------------------------------
 def check_dependencies():
     """Checks and installs required Python packages."""
-    needed = ["pyngrok", "python-dotenv", "qrcode"]
+    needed = ["python-dotenv", "qrcode"]
     installed = []
     
     # Check what is missing
     for pkg in needed:
         try:
-            if pkg == "pyngrok": from pyngrok import ngrok
-            elif pkg == "python-dotenv": from dotenv import load_dotenv
+            if pkg == "python-dotenv": from dotenv import load_dotenv
             elif pkg == "qrcode": import qrcode
             installed.append(pkg)
         except ImportError:
@@ -50,7 +47,6 @@ def check_node_environment():
     if not os.path.exists("node_modules"):
         print("📦 'node_modules' missing. Installing Node.js dependencies...")
         try:
-            # shell=True often needed on Windows for npm. On *nix, 'npm' usually works directly if in PATH.
             is_windows = sys.platform == "win32"
             subprocess.check_call(["npm", "install"], shell=is_windows)
             print("✅ Node dependencies installed.\n")
@@ -65,8 +61,6 @@ def get_local_ip():
     """Robustly determines the local LAN IP address."""
     s = None
     try:
-        # Connect to a public DNS server (doesn't actually send data)
-        # This forces the OS to determine the correct outgoing interface
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8', 80))
         IP = s.getsockname()[0]
@@ -75,6 +69,36 @@ def get_local_ip():
     finally:
         s.close()
     return IP
+
+def get_tailscale_ip():
+    """Attempts to get the Tailscale IP address."""
+    try:
+        result = subprocess.run(
+            ["tailscale", "ip", "-4"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+def get_tailscale_hostname():
+    """Attempts to get the Tailscale hostname."""
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--json"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            import json
+            status = json.loads(result.stdout)
+            dns_name = status.get("Self", {}).get("DNSName", "")
+            if dns_name:
+                return dns_name.rstrip(".")
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        pass
+    return None
 
 def generate_passcode():
     """Generates a 6-digit passcode."""
@@ -86,41 +110,30 @@ def print_qr(url):
     qr = qrcode.QRCode(version=1, box_size=1, border=1)
     qr.add_data(url)
     qr.make(fit=True)
-    # Using 'ANSI' implies standard block characters which work in most terminals
-    # invert=True is often needed for dark terminals (white blocks on black bg)
     qr.print_ascii(invert=True)
 
 # -----------------------------------------------------------------------------
 # Main Execution
 # -----------------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Antigravity Phone Connect Launcher")
-    parser.add_argument('--mode', choices=['local', 'web'], default='web', help="Mode to run in: 'local' (WiFi) or 'web' (Internet)")
-    args = parser.parse_args()
-
     # 1. Setup Environment
     check_dependencies()
     check_node_environment()
     
-    # Suppress pyngrok noise (especially during shutdown)
-    logging.getLogger("pyngrok").setLevel(logging.ERROR)
-    
-    from pyngrok import ngrok
-
     from dotenv import load_dotenv
     
     # Load .env if it exists
     load_dotenv()
     
-    # Setup App Password
+    # Setup App Password (optional with Tailscale, but still useful)
     passcode = os.environ.get('APP_PASSWORD')
     if not passcode:
         passcode = generate_passcode()
-        os.environ['APP_PASSWORD'] = passcode # Set for child process
+        os.environ['APP_PASSWORD'] = passcode
         print(f"⚠️  No APP_PASSWORD in .env. Using temporary: {passcode}")
 
-    # 2. Start Node.js Server (Common to both modes)
-    print(f"🚀 Starting Antigravity Server ({args.mode.upper()} mode)...")
+    # 2. Start Node.js Server
+    print(f"🚀 Starting Antigravity Phone Connect Server...")
     
     # Clean up old logs
     with open("server_log.txt", "w") as f:
@@ -130,16 +143,10 @@ def main():
     node_process = None
     
     try:
-        # Redirect stdout/stderr to file
         log_file = open("server_log.txt", "a")
-        if sys.platform == "win32":
-            # On Windows, using shell=True can help with path resolution but makes killing harder.
-            # We'll use shell=False and rely on PATH.
-            node_process = subprocess.Popen(node_cmd, stdout=log_file, stderr=log_file, env=os.environ.copy())
-        else:
-            node_process = subprocess.Popen(node_cmd, stdout=log_file, stderr=log_file, env=os.environ.copy())
+        node_process = subprocess.Popen(node_cmd, stdout=log_file, stderr=log_file, env=os.environ.copy())
             
-        time.sleep(2) # Give it a moment to crash if it's going to
+        time.sleep(2)
         if node_process.poll() is not None:
             print("❌ Server failed to start immediately. Check server_log.txt.")
             sys.exit(1)
@@ -148,78 +155,56 @@ def main():
         print(f"❌ Failed to launch node: {e}")
         sys.exit(1)
 
-    # 3. Mode Specific Logic
-    final_url = ""
-    
+    # 3. Display Access Info
     try:
-        if args.mode == 'local':
-            ip = get_local_ip()
-            port = os.environ.get('PORT', '3000')
-            
-            # Detect HTTPS
-            protocol = "http"
-            if os.path.exists('certs/server.key') and os.path.exists('certs/server.cert'):
-                protocol = "https"
-            
-            final_url = f"{protocol}://{ip}:{port}"
-            
-            print("\n" + "="*50)
-            print(f"📡 LOCAL WIFI ACCESS")
-            print("="*50)
-            print(f"🔗 URL: {final_url}")
-            print(f"🔑 Passcode: Not required for local WiFi (Auto-detected)")
-            
-            print("\n📱 Scan this QR Code to connect:")
-            print_qr(final_url)
+        ip = get_local_ip()
+        port = os.environ.get('PORT', '3000')
+        
+        # Detect HTTPS
+        protocol = "http"
+        if os.path.exists('certs/server.key') and os.path.exists('certs/server.cert'):
+            protocol = "https"
+        
+        local_url = f"{protocol}://{ip}:{port}"
+        
+        # Try to get Tailscale info
+        ts_ip = get_tailscale_ip()
+        ts_hostname = get_tailscale_hostname()
+        
+        print("\n" + "="*50)
+        print(f"📡 ANTIGRAVITY PHONE CONNECT")
+        print("="*50)
+        print(f"🔗 Local URL:     {local_url}")
+        
+        if ts_ip:
+            ts_url = f"{protocol}://{ts_ip}:{port}"
+            print(f"🌐 Tailscale URL: {ts_url}")
+        
+        if ts_hostname:
+            ts_host_url = f"{protocol}://{ts_hostname}:{port}"
+            print(f"🏷️  Tailscale DNS:  {ts_host_url}")
+        
+        if passcode:
+            print(f"🔑 Passcode:      {passcode}")
+        
+        # QR code — prefer Tailscale URL for phone access
+        qr_url = local_url
+        if ts_ip:
+            qr_url = f"{protocol}://{ts_ip}:{port}"
+        
+        print(f"\n📱 Scan this QR Code to connect:")
+        print_qr(qr_url)
 
-            print("-" * 50)
-            print("📝 Steps to Connect:")
+        print("-" * 50)
+        print("📝 Steps to Connect:")
+        if ts_ip:
+            print("1. Ensure Tailscale is running on your phone.")
+            print("2. Scan the QR code OR open the Tailscale URL in your browser.")
+        else:
             print("1. Ensure your phone is on the SAME Wi-Fi network as this computer.")
-            print("2. Open your phone's Camera app or a QR scanner.")
-            print("3. Scan the code above OR manually type the URL into your browser.")
-            print("4. You should be connected automatically!")
-            
-        elif args.mode == 'web':
-            # Check Ngrok Token
-            token = os.environ.get('NGROK_AUTHTOKEN')
-            if token:
-                ngrok.set_auth_token(token)
-            else:
-                print("⚠️  Warning: NGROK_AUTHTOKEN not found in .env. Tunnel might expire.")
-
-            port = os.environ.get('PORT', '3000')
-            
-            # Detect HTTPS
-            protocol = "http"
-            if os.path.exists('certs/server.key') and os.path.exists('certs/server.cert'):
-                protocol = "https"
-                
-            addr = f"{protocol}://localhost:{port}"
-            
-            print("PLEASE WAIT... Establishing Tunnel...")
-            tunnel = ngrok.connect(addr, host_header="rewrite")
-            public_url = tunnel.public_url
-            
-            # Magic URL with password
-            final_url = f"{public_url}?key={passcode}"
-            
-            print("\n" + "="*50)
-            print(f"   🌍 GLOBAL WEB ACCESS")
-            print("="*50)
-            print(f"🔗 Base URL: {public_url}")
-            print(f"🔑 Passcode: {passcode}")
-            
-            print("\n📱 Scan this Magic QR Code (Auto-Logins):")
-            print_qr(final_url)
-
-            print("-" * 50)
-            print("📝 Steps to Connect:")
-            print("1. Switch your phone to Mobile Data or Turn off Wi-Fi.")
-            print("2. Open your phone's Camera app or a QR scanner.")
-            print("3. Scan the code above to auto-login.")
-            print(f"4. Or visit {public_url}")
-            print(f"5. Enter passcode: {passcode}")
-            print("6. You should be connected automatically!")
+            print("   (Or install Tailscale on both devices for remote access)")
+            print("2. Scan the QR code OR type the URL into your browser.")
+        print("3. You should be connected automatically!")
 
         print("="*50)
         print("✅ Server is running in background. Logs -> server_log.txt")
@@ -273,9 +258,6 @@ def main():
                     node_process.wait(timeout=2)
                 except subprocess.TimeoutExpired:
                     node_process.kill()
-            
-            if args.mode == 'web':
-                ngrok.kill()
         except:
             pass
         

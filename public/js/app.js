@@ -35,9 +35,7 @@ let chatIsOpen = true; // Track if a chat is currently open
 
 // --- Auth Utilities ---
 async function fetchWithAuth(url, options = {}) {
-    // Add ngrok skip warning header to all requests
     if (!options.headers) options.headers = {};
-    options.headers['ngrok-skip-browser-warning'] = 'true';
 
     try {
         const res = await fetch(url, options);

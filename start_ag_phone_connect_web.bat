@@ -1,19 +1,18 @@
 @echo off
 setlocal enabledelayedexpansion
-title Antigravity Phone Connect - WEB MODE
+title Antigravity Phone Connect - Tailscale Access
 
 :: Navigate to script directory
 cd /d "%~dp0"
 
 echo ===================================================
-echo   Antigravity Phone Connect - WEB ACCESS MODE
+echo   Antigravity Phone Connect - Tailscale Access
 echo ===================================================
 echo.
 
-:: 0. Aggressive Cleanup (Clear any stuck processes from previous runs)
+:: 0. Cleanup old server processes
 echo [0/2] Cleaning up orphans...
 taskkill /f /im node.exe /fi "WINDOWTITLE eq AG_SERVER_PROC*" >nul 2>&1
-taskkill /f /im ngrok.exe >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :3000 ^| findstr LISTENING') do taskkill /f /pid %%a >nul 2>&1
 
 :: 1. Ensure dependencies are installed
@@ -33,7 +32,7 @@ if %errorlevel% neq 0 (
 :: 3. Check Python
 where python >nul 2>nul
 if %errorlevel% neq 0 (
-    echo [ERROR] Python missing. Required for the web tunnel.
+    echo [ERROR] Python missing.
     pause
     exit /b
 )
@@ -42,14 +41,14 @@ if %errorlevel% neq 0 (
 if exist ".env" goto ENV_FOUND
 if exist "%~dp0.env" goto ENV_FOUND
 
-echo [WARNING] .env file not found. This is required for Web Access.
+echo [WARNING] .env file not found.
 echo.
 
 if exist ".env.example" (
     echo [INFO] Creating .env from .env.example...
     copy .env.example .env >nul
     echo [SUCCESS] .env created from template!
-    echo [ACTION] Please open .env and update it with your configuration (e.g., NGROK_AUTHTOKEN).
+    echo [ACTION] Please update .env with your configuration if needed.
     pause
     exit /b
 ) else (
@@ -61,10 +60,10 @@ if exist ".env.example" (
 :ENV_FOUND
 echo [INFO] .env configuration found.
 
-:: 5. Launch everything via Python
+:: 5. Launch via Python launcher
 echo [1/1] Launching Antigravity Phone Connect...
-echo (This will start both the server and the web tunnel)
-python launcher.py --mode web
+echo (Access via Tailscale hostname or local IP)
+python launcher.py
 
 :: 6. Auto-close when done
 exit

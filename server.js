@@ -1251,10 +1251,10 @@ function hashString(str) {
     return hash.toString(36);
 }
 
-// Check if a request is from the same Wi-Fi (internal network)
+// Check if a request is from a trusted network (local Wi-Fi or Tailscale)
 function isLocalRequest(req) {
-    // 1. Check for proxy headers (Cloudflare, ngrok, etc.)
-    // If these exist, the request is coming via an external tunnel/proxy
+    // 1. Check for proxy headers (Cloudflare, etc.)
+    // If these exist, the request is coming via an external proxy
     if (req.headers['x-forwarded-for'] || req.headers['x-forwarded-host'] || req.headers['x-real-ip']) {
         return false;
     }
@@ -1262,7 +1262,7 @@ function isLocalRequest(req) {
     // 2. Check the remote IP address
     const ip = req.ip || req.socket.remoteAddress || '';
 
-    // Standard local/private IPv4 and IPv6 ranges
+    // Standard local/private IPv4 and IPv6 ranges + Tailscale CGNAT (100.64.0.0/10)
     return ip === '127.0.0.1' ||
         ip === '::1' ||
         ip === '::ffff:127.0.0.1' ||
@@ -1271,6 +1271,8 @@ function isLocalRequest(req) {
         ip.startsWith('172.16.') || ip.startsWith('172.17.') ||
         ip.startsWith('172.18.') || ip.startsWith('172.19.') ||
         ip.startsWith('172.2') || ip.startsWith('172.3') ||
+        ip.startsWith('100.') ||  // Tailscale CGNAT range
+        ip.startsWith('::ffff:100.') ||  // Tailscale via IPv6-mapped
         ip.startsWith('::ffff:192.168.') ||
         ip.startsWith('::ffff:10.');
 }
@@ -1394,12 +1396,7 @@ async function createServer() {
     app.use(express.json());
     app.use(cookieParser('antigravity_secret_key_1337'));
 
-    // Ngrok Bypass Middleware
-    app.use((req, res, next) => {
-        // Tell ngrok to skip the "visit" warning for API requests
-        res.setHeader('ngrok-skip-browser-warning', 'true');
-        next();
-    });
+    // (ngrok middleware removed — using Tailscale for remote access)
 
     // Auth Middleware
     app.use((req, res, next) => {

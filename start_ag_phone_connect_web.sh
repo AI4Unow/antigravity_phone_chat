@@ -4,14 +4,13 @@
 cd "$(dirname "$0")"
 
 echo "==================================================="
-echo "  Antigravity Phone Connect - WEB ACCESS MODE"
+echo "  Antigravity Phone Connect - Tailscale Access"
 echo "==================================================="
 echo
 
-# 0. Aggressive Cleanup
+# 0. Cleanup old server processes
 echo "[0/2] Cleaning up orphans..."
 pkill -f "node server.js" &> /dev/null
-pkill -f "ngrok" &> /dev/null
 # Cleanup by port (Linux/Mac)
 if command -v lsof &> /dev/null; then
     lsof -ti:3000 | xargs kill -9 &> /dev/null
@@ -37,13 +36,13 @@ fi
 
 # 4. Check for .env file
 if [ ! -f ".env" ]; then
-    echo "[WARNING] .env file not found. This is required for Web Access."
+    echo "[WARNING] .env file not found."
     echo
     if [ -f ".env.example" ]; then
         echo "[INFO] Creating .env from .env.example..."
         cp .env.example .env
         echo "[SUCCESS] .env created from template!"
-        echo "[ACTION] Please open .env and update it with your configuration (e.g., NGROK_AUTHTOKEN)."
+        echo "[ACTION] Please update .env with your configuration if needed."
         exit 0
     else
         echo "[ERROR] .env.example not found. Cannot create .env template."
@@ -52,10 +51,10 @@ if [ ! -f ".env" ]; then
 fi
 echo "[INFO] .env configuration found."
 
-# 5. Launch everything via Python
+# 5. Launch via Python launcher
 echo "[1/1] Launching Antigravity Phone Connect..."
-echo "(This will start both the server and the web tunnel)"
-python3 launcher.py --mode web
+echo "(Access via Tailscale hostname or local IP)"
+python3 launcher.py
 
 # 6. Auto-close when done
 exit 0
