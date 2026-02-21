@@ -23,7 +23,13 @@
 
 import blessed from 'blessed';
 import http from 'http';
+import https from 'https';
 import { WebSocket } from 'ws';
+import fs from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // --- Config ---
 const args = process.argv.slice(2);
@@ -31,16 +37,29 @@ function getArg(name, def) {
     const i = args.indexOf(`--${name}`);
     return i !== -1 && args[i + 1] ? args[i + 1] : def;
 }
+const hasFlag = (name) => args.includes(`--${name}`);
 
 const HOST = getArg('host', 'localhost');
 const PORT = parseInt(getArg('port', '3000'));
-const BASE = `http://${HOST}:${PORT}`;
-const WS_URL = `ws://${HOST}:${PORT}`;
+
+// Auto-detect HTTPS: check if certs exist or --https flag passed
+const hasSSL = hasFlag('https') ||
+    (fs.existsSync(join(__dirname, 'certs', 'server.key')) &&
+        fs.existsSync(join(__dirname, 'certs', 'server.cert')));
+
+const PROTOCOL = hasSSL ? 'https' : 'http';
+const WS_PROTOCOL = hasSSL ? 'wss' : 'ws';
+const BASE = `${PROTOCOL}://${HOST}:${PORT}`;
+const WS_URL = `${WS_PROTOCOL}://${HOST}:${PORT}`;
+
+// Allow self-signed certs
+const httpClient = hasSSL ? https : http;
+const REQUEST_OPTS = hasSSL ? { rejectUnauthorized: false } : {};
 
 // --- HTTP Client ---
 function apiGet(path) {
     return new Promise((resolve, reject) => {
-        http.get(`${BASE}${path}`, { timeout: 5000 }, (res) => {
+        httpClient.get(`${BASE}${path}`, { timeout: 5000, ...REQUEST_OPTS }, (res) => {
             let data = '';
             res.on('data', c => data += c);
             res.on('end', () => {
@@ -54,10 +73,15 @@ function apiGet(path) {
 function apiPost(path, body = {}) {
     return new Promise((resolve, reject) => {
         const payload = JSON.stringify(body);
-        const req = http.request(`${BASE}${path}`, {
+        const url = new URL(`${BASE}${path}`);
+        const req = httpClient.request({
+            hostname: url.hostname,
+            port: url.port,
+            path: url.pathname,
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
             timeout: 10000,
+            ...REQUEST_OPTS,
         }, (res) => {
             let data = '';
             res.on('data', c => data += c);
@@ -507,7 +531,7 @@ async function showHistory() {
 // --- WebSocket for live updates ---
 function connectWs() {
     try {
-        ws = new WebSocket(WS_URL);
+        ws = new WebSocket(WS_URL, { rejectUnauthorized: false });
 
         ws.on('open', () => {
             connected = true;
