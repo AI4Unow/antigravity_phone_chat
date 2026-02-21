@@ -102,6 +102,14 @@ function htmlToText(html) {
 
     let text = html;
 
+    // Remove script, style, svg, and noscript blocks entirely (including content)
+    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    text = text.replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, '');
+    text = text.replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '');
+    text = text.replace(/<link[^>]*>/gi, '');
+    text = text.replace(/<meta[^>]*>/gi, '');
+
     // Preserve code blocks
     text = text.replace(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/gi, (_, code) => {
         const decoded = decodeEntities(code.replace(/<[^>]+>/g, ''));
